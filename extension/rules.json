@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": { "requestDomains": ["pendo.io"], "initiatorDomains": ["instructure.com"] }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": { "requestDomains": ["sentry.insops.net"], "initiatorDomains": ["instructure.com"] }
+  }
+]
