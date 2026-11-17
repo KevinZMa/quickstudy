@@ -3,7 +3,6 @@
   if (window.top !== window || document.getElementById("quickstudy-host")) return;
   const W = 300;
 
-  // Page-level layout tweak: make room for the panel when it's open.
   const pageStyle = document.createElement("style");
   pageStyle.textContent = `html.ctl-open body { margin-right: ${W}px !important; }`;
   document.head.append(pageStyle);

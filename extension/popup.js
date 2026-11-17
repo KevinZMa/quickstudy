@@ -1,9 +1,6 @@
-// Toolbar popup: same list, available from any site.
-// The Canvas origin is remembered the first time a Canvas page is opened with the extension installed.
+// Toolbar popup. The Canvas origin is saved when a Canvas page is first opened.
 
-// Open a task on Canvas itself:
-//  - current tab is Canvas → the reader opens there, instantly, from cache;
-//  - anywhere else → a new tab enters through the fast /robots.txt shell (see boot.js).
+// Opens in the current tab if it is Canvas, otherwise in a new tab through boot.js.
 async function openTask(base, path) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab && tab.url && tab.url.startsWith(base + "/")) {

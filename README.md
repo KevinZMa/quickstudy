@@ -1,24 +1,29 @@
 # Quickstudy
 
-Quickstudy is a small Chrome extension, built on Manifest V3, that makes Canvas LMS faster and
-easier to read. It has no build step, no dependencies and no background page.
+A Chrome extension (Manifest V3) for Canvas LMS: a docked task timeline, a workspace for reading
+assignments and files side by side, and ⌘K search. No build step; the only dependency is
+mammoth.js, vendored.
 
 ## Features
 
-- **Task panel.** A list of upcoming work stays docked on every Canvas page. It's grouped into
-  Overdue, Today, Tomorrow, Next 7 days and Later. A progress ring shows how much of this week's
-  work is done, and you can filter the list by course.
-- **Instant reader.** Assignments, pages, discussions, announcements and quizzes open in a
-  clean reading view built from Canvas's API. The data is fetched ahead of time (on hover, or in the
-  background for upcoming tasks), so most items open without waiting on the network.
-  **Open in Canvas** loads the full page whenever you need to submit something.
-- **⌘K / Ctrl+K search.** Searches everything in your active courses. Prefixes narrow the
-  results to one type, and Tab on a course limits the search to that course.
-- **Toolbar popup.** The same task list as the panel. A click opens the task on Canvas, using a
-  fast path when the current tab isn't Canvas.
-- **Telemetry blocking.** Blocks Pendo usage analytics and Sentry error reporting on Canvas pages.
+- **Task panel.** Upcoming work, docked on every Canvas page as a vertical timeline by day. The
+  right column shows one value: time late, time left when under 6 hours, or the due time when it
+  is not 11:59 PM. A dashed ring marks items with nothing to upload. Completed items show the
+  submission time, lateness or score.
+- **Workspace.** Assignments, pages, discussions, announcements, quizzes and files open as panes
+  rendered from the Canvas API, with a date timeline and a Files list (pinned, linked in the text,
+  then by module). Links open a pane to the right; panes that do not fit fold into title strips.
+  Selecting an item from the task list or search replaces the workspace; files from search and
+  ⌥-click open beside it. Each item restores its last set of panes. Inspired by
+  [Andy Matuschak](https://notes.andymatuschak.org).
+- **File viewer.** PDFs in Chrome's PDF viewer, Word files via mammoth.js, and Google
+  Docs/Slides/Sheets as PDF exports (requires a Google sign-in). Files are prefetched.
+- **Search (⌘K / Ctrl+K).** Searches the active courses. Falls back to the Canvas API when the
+  local index has few matches.
+- **Toolbar popup.** The task list, available from any tab.
+- **Telemetry blocking.** Blocks Pendo and Sentry requests from Canvas pages.
 
-### Search prefixes
+### Search
 
 | Prefix | Searches |
 |---|---|
@@ -30,65 +35,64 @@ easier to read. It has no build step, no dependencies and no background page.
 | `.` | files and links |
 | `>` | commands |
 
-### Palette keys
-
 | Key | Action |
 |---|---|
-| ↵ | open in the reader |
-| ⌘↵ | open the full Canvas page in a new tab |
-| ⇥ (on a course) | search inside that course |
-| ⌫ (in an empty box) | leave the course |
-| Esc | clear the box, then close |
-| ↑ ↓ or Ctrl-N/P | move the selection |
+| ↵ | open |
+| ⌥↵ | open beside the workspace |
+| ⇧↵ | pin a file to the workspace |
+| ⌘↵ | open the Canvas page in a new tab |
+| ⇥ (on a course) | search within the course |
+| ⌫ (empty query) | leave the course |
+| Esc | clear, then close |
+| ↑ ↓, Ctrl-N/P | move the selection |
 
 ## Install
 
-1. Clone this repo.
-2. Open `chrome://extensions` and turn on **Developer mode**.
-3. Click **Load unpacked** and select the `extension/` folder.
-4. Open your school's Canvas site once. The popup remembers it after that.
+1. Clone this repository.
+2. Open `chrome://extensions` and enable **Developer mode**.
+3. Click **Load unpacked** and select `extension/`.
+4. Open your Canvas site once; the popup remembers it.
 
-The extension runs on `*.instructure.com`. Schools that host Canvas on their own domain
-(for example `canvas.school.edu`) need that domain added to `host_permissions`, `content_scripts`
-and the `initiatorDomains` in `rules.json`.
+The extension matches `*.instructure.com`. For Canvas on a custom domain, add it to
+`host_permissions`, `content_scripts`, `web_accessible_resources` and `initiatorDomains` in
+`rules.json`.
 
-## How it works
+## Files
 
 | File | Role |
 |---|---|
-| `core.js` | Task list UI and data, shared by the panel and the popup. Fetches the Canvas planner API once, caches a trimmed copy and refreshes it when it's more than 5 minutes old. |
-| `content.js` | Docks the panel on Canvas pages. |
-| `reader.js` | Instant reader. Intercepts plain clicks on supported links, renders them from cached API data and keeps browser history consistent. Teacher-written HTML is rebuilt from an allowlist of tags and attributes, never inserted as-is. |
-| `index.js` | Builds the search index in the background, one tab at a time. See [docs/INDEX.md](docs/INDEX.md). |
-| `palette.js` | The ⌘K palette: fuzzy matching, ranking, keyboard handling. |
-| `boot.js` | Fast entry from outside Canvas. The popup opens `/robots.txt#lite:<path>`, which Canvas answers far sooner than a full page. Then `boot.js` puts the real path in the address bar and the reader draws the page. Reloading gives the full Canvas page. |
-| `rules.json` | Blocking rules for the services listed above. |
+| `core.js` | Task list UI and data, shared by the panel and popup. Caches the planner API for 5 minutes. |
+| `content.js` | Docks the panel. |
+| `reader.js` | Workspace panes, link interception, history and prefetching. Teacher HTML is rebuilt from an allowlist. |
+| `index.js` | Background search index, one tab at a time. See [docs/INDEX.md](docs/INDEX.md). |
+| `palette.js` | ⌘K search: matching, ranking, keys. |
+| `boot.js` | Fast entry from the popup via `/robots.txt#lite:<path>`. |
+| `viewer.html`, `viewer.js`, `files.js` | File viewer and shared file cache. |
+| `bg.js` | Service worker that prefetches files. |
+| `vendor/` | mammoth.js 1.9.1 (BSD-2-Clause). |
+| `rules.json` | Telemetry blocking rules. |
 
-### Data and privacy
+## Privacy
 
-Everything stays in `chrome.storage.local` on your machine. The extension only talks to your
-Canvas site, using your existing session. Nothing is sent anywhere else.
+Data is stored in `chrome.storage.local` and the extension cache. Requests go only to your Canvas
+site, its file storage, and Google Docs when a Google file is opened, using your existing sessions.
 
-### Limits
+## Limits
 
-- **The reader is read-only.** Submitting work, taking quizzes, replying to discussions, rubrics
-  and peer reviews need the full Canvas page.
-- **Module progress.** Viewing an item in the reader may not count as viewing it for
-  "must view" module requirements, or in a teacher's page-view statistics. If either matters, use
-  **Open in Canvas**.
-- **Browsers that disable speculation rules.** In those browsers, the reader is the only way to
-  make navigation feel instant.
+- Submitting work, taking quizzes, replying to discussions, rubrics and peer reviews require the
+  Canvas page.
+- Viewing an item in the workspace may not satisfy "must view" module requirements or count in
+  page-view statistics. Use **Open in Canvas** where that matters.
 
 ## Tests
 
-`tests/e2e.py` loads the unpacked extension in headless Chrome against a mocked Canvas with
-fake data, then checks the panel, reader, palette and popup flows.
+`tests/e2e.py` runs the extension in headless Chromium against a mocked Canvas.
 
 ```sh
-pip install playwright
-python tests/e2e.py            # set CHROME=/path/to/chrome if needed
+pip install playwright && playwright install chromium
+python tests/e2e.py   # CHROME=/path/to/chromium for another build
 ```
 
 ## Disclaimer
 
-This project is not affiliated with or endorsed by Instructure. Canvas is a trademark of Instructure, Inc.
+Not affiliated with or endorsed by Instructure. Canvas is a trademark of Instructure, Inc.

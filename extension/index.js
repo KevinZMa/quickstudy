@@ -1,5 +1,4 @@
-// Quickstudy index: one flat, versioned list of everything in your courses.
-// Schema is documented in docs/INDEX.md so other tools can read it.
+// Search index: a flat, versioned list of course items. Schema: docs/INDEX.md.
 (() => {
   if (window.top !== window) return;
   const SCHEMA = 1;
@@ -20,41 +19,31 @@
     }
     return all;
   }
-  // Hidden course tabs answer 403/404. Remember that for a week instead of asking every refresh.
+  // Hidden course tabs return 403/404; skip them for a week.
   const DENY_MS = 7 * 864e5;
   let denied = {};
-  const soft = (p, pages, tag) => {
+  // record=false (live search) does not update `denied`, so throttled requests cannot hide a tab.
+  const soft = (p, pages, tag, record = true) => {
     if (tag && denied[tag] && Date.now() - denied[tag] < DENY_MS) return Promise.resolve([]);
-    return api(p, pages).catch((e) => { if (tag && /^40[34]$/.test(e.message)) denied[tag] = Date.now(); return []; });
+    return api(p, pages).catch((e) => { if (record && tag && /^40[34]$/.test(e.message)) denied[tag] = Date.now(); return []; });
   };
 
-  // Courses starred on the Canvas dashboard rank higher and refresh more often.
   const isFavorite = (c) => !!c.is_favorite;
 
-  async function indexCourse(c) {
-    const cid = String(c.id), base = `/api/v1/courses/${cid}`, out = new Map(), modOf = {};
+  function toItems(cid, { asg = [], mods = [], pages = [], discs = [], anns = [], files = [] }) {
+    const out = new Map(), modOf = {}, modPages = [];
     const add = (type, id, title, url, extra = {}) => {
       const key = `${type}:${id}`;
       if (!title || out.has(key)) return;
       out.set(key, { key, type, id: String(id), title: String(title).trim(), course_id: cid, url, ...extra });
     };
-
-    const [asg, mods, pages, discs, anns, files] = await Promise.all([
-      soft(`${base}/assignments?per_page=100`),
-      soft(`${base}/modules?include[]=items&per_page=50`),
-      soft(`${base}/pages?per_page=100&sort=title`, 10, `${cid}:pages`),
-      soft(`${base}/discussion_topics?per_page=100`),
-      soft(`/api/v1/announcements?context_codes[]=course_${cid}&per_page=50&start_date=${new Date(Date.now() - 180 * 864e5).toISOString().slice(0, 10)}`, 2),
-      soft(`${base}/files?per_page=100&sort=updated_at&order=desc`, 3, `${cid}:files`),
-    ]);
-
     for (const m of mods) {
       add("module", m.id, m.name, `/courses/${cid}/modules#module_${m.id}`, { position: m.position });
       for (const it of m.items || []) {
         if (it.type === "SubHeader") continue;
-        if (it.type === "File") add("file", it.content_id, it.title, path(it.html_url), { module: m.name });
+        if (it.type === "File") add("file", it.content_id, it.title, `/courses/${cid}/files/${it.content_id}`, { module: m.name });
         else if (it.type === "ExternalUrl" || it.type === "ExternalTool") add("link", it.id, it.title, path(it.html_url), { module: m.name, external_url: it.external_url || null });
-        else if (it.type === "Page") modOf[`page:${it.page_url}`] = m.name;
+        else if (it.type === "Page") { modOf[`page:${it.page_url}`] = m.name; modPages.push([it, m.name]); }
         else modOf[`${it.type.toLowerCase()}:${it.content_id}`] = m.name;
       }
     }
@@ -65,10 +54,52 @@
       else add("assignment", a.id, a.name, path(a.html_url) || `/courses/${cid}/assignments/${a.id}`, { ...common, module: modOf[`assignment:${a.id}`] });
     }
     for (const p of pages) add("page", p.url, p.title, `/courses/${cid}/pages/${p.url}`, { updated_at: p.updated_at, module: modOf[`page:${p.url}`] });
+    // Added after the Pages API results, which take precedence. Covers hidden Pages tabs.
+    for (const [it, mod] of modPages) add("page", it.page_url, it.title, `/courses/${cid}/pages/${it.page_url}`, { module: mod });
     for (const d of discs) add("discussion", d.id, d.title, `/courses/${cid}/discussion_topics/${d.id}`, { updated_at: d.last_reply_at || d.posted_at });
     for (const a of anns) add("announcement", a.id, a.title, `/courses/${cid}/discussion_topics/${a.id}`, { posted_at: a.posted_at });
     for (const f of files) add("file", f.id, f.display_name, `/courses/${cid}/files/${f.id}`, { updated_at: f.updated_at, size: f.size });
     return [...out.values()];
+  }
+
+  async function indexCourse(c) {
+    const cid = String(c.id), base = `/api/v1/courses/${cid}`;
+    const [asg, mods, pages, discs, anns, files] = await Promise.all([
+      soft(`${base}/assignments?per_page=100`),
+      soft(`${base}/modules?include[]=items&per_page=50`),
+      soft(`${base}/pages?per_page=100&sort=title`, 10, `${cid}:pages`),
+      soft(`${base}/discussion_topics?per_page=100`),
+      soft(`/api/v1/announcements?context_codes[]=course_${cid}&per_page=50&start_date=${new Date(Date.now() - 180 * 864e5).toISOString().slice(0, 10)}`, 2),
+      soft(`${base}/files?per_page=100&sort=updated_at&order=desc`, 3, `${cid}:files`),
+    ]);
+    return toItems(cid, { asg, mods, pages, discs, anns, files });
+  }
+
+  // Queries Canvas directly. Results are merged into the index unless a build is running.
+  async function searchLive(q, courseId) {
+    const idx = await load();
+    denied = idx.denied || denied;
+    const t = encodeURIComponent(q);
+    const ids = courseId ? [String(courseId)] : idx.courses.map((c) => c.id);
+    const per = await Promise.all(ids.map(async (cid) => {
+      const base = `/api/v1/courses/${cid}`;
+      const [asg, pages, files, discs, mods] = await Promise.all([
+        soft(`${base}/assignments?search_term=${t}&per_page=50`, 1, null, false),
+        soft(`${base}/pages?search_term=${t}&per_page=50`, 1, `${cid}:pages`, false),
+        soft(`${base}/files?search_term=${t}&per_page=50`, 1, `${cid}:files`, false),
+        soft(`${base}/discussion_topics?search_term=${t}&per_page=50`, 1, null, false),
+        soft(`${base}/modules?include[]=items&search_term=${t}&per_page=50`, 1, null, false),
+      ]);
+      return toItems(cid, { asg, pages, files, discs, mods });
+    }));
+    const items = per.flat();
+    if (items.length && !building && cache) {
+      const byKey = new Map(cache.items.map((it) => [it.key, it]));
+      for (const it of items) byKey.set(it.key, { ...byKey.get(it.key), ...it });
+      cache = { ...cache, items: [...byKey.values()] };
+      save(cache);
+    }
+    return items;
   }
 
   // ---------- storage ----------
@@ -108,7 +139,6 @@
           short: shortName(c.name), code: c.course_code, url: `/courses/${c.id}`, is_favorite: isFavorite(c) }));
         const live = new Set(idx.courses.map((c) => c.id));
         idx.items = idx.items.filter((it) => live.has(it.course_id));
-        // Favorites first, so the courses used most are fresh soonest.
         const order = [...courses].sort((a, b) => isFavorite(b) - isFavorite(a));
         for (const c of order) {
           const cid = String(c.id), ttl = isFavorite(c) ? FAVORITE_TTL : OTHER_TTL;
@@ -138,9 +168,9 @@
     });
   }
 
-  window.QuickstudyIndex = { load, build, exportJSON, onChange: (f) => listeners.add(f), isBuilding: () => !!building };
+  window.QuickstudyIndex = { load, build, exportJSON, searchLive, onChange: (f) => listeners.add(f), isBuilding: () => !!building };
 
-  // Refresh stale courses when the browser is idle, a few seconds after a page settles.
+  // Refresh stale courses when idle.
   const idle = window.requestIdleCallback || ((f) => setTimeout(f, 3000));
   setTimeout(() => idle(() => build().catch(() => {})), 4000);
 })();

@@ -1,9 +1,8 @@
 # Index format (schema 1)
 
-Quickstudy keeps a flat list of everything in the user's active courses. It lives in
+Quickstudy keeps a flat list of items in the active courses. It lives in
 `chrome.storage.local` under the key `index`. You can export it with **⌘K → `>` Export index as JSON**,
-which downloads `canvas-index.json`. The format is designed to be read directly by other tools, such as launchers,
-scripts or a local mirror.
+which downloads `canvas-index.json`. Other tools, such as launchers or scripts, can read the format directly.
 
 ```jsonc
 {
@@ -56,15 +55,17 @@ The index refreshes in the background while the browser is idle:
 
 Some course tabs are hidden from students, often Pages or Files. When a request for one of
 these is refused, the extension stops asking for that tab for a week rather than retrying on
-every refresh. Files in a hidden Files tab still reach the index through Modules.
+every refresh. Files and pages in a hidden tab still reach the index through Modules.
+
+Live search results are added to the index unless a rebuild is running.
 
 ## Using the index outside the browser
 
 Tools outside the browser can't read extension storage, so the index has to be written to a file
-or served from a local URL. Here are the options, from least to most effort:
+or served from a local URL. Options, from least to most effort:
 
 1. **Manual export.** Export the JSON into a folder that your tool reads.
 2. **Local server.** POST the index to a local HTTP endpoint whenever it changes. This takes one
    `fetch` in `index.js` plus a `host_permissions` entry.
-3. **Native messaging.** A small host program writes the file directly. This is the most robust
-   option, but users must install that program separately.
+3. **Native messaging.** A small host program writes the file directly. Requires installing that program
+   separately.

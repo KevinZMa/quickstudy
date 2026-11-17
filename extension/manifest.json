@@ -1,26 +1,84 @@
 {
   "manifest_version": 3,
   "name": "Quickstudy",
-  "version": "0.1.0",
-  "description": "A faster, lighter Canvas: a docked task list, an instant reader for assignments and pages, ⌘K search, and telemetry blocking.",
+  "version": "0.2.0",
+  "description": "A faster, lighter Canvas: a docked task timeline, a workspace with sliding panes for assignments and files, ⌘K search, and telemetry blocking.",
   "action": {
     "default_popup": "popup.html",
-    "default_icon": { "16": "icon16.png", "32": "icon32.png", "48": "icon48.png" }
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png"
+    }
   },
-  "icons": { "16": "icon16.png", "32": "icon32.png", "48": "icon48.png", "128": "icon128.png" },
-  "permissions": ["storage", "cookies", "declarativeNetRequest"],
-  "host_permissions": ["https://*.instructure.com/*"],
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "cookies",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": [
+    "https://*.instructure.com/*",
+    "https://*.inscloudgate.net/*",
+    "https://*.canvas-user-content.com/*",
+    "https://instructure-uploads.s3.amazonaws.com/*",
+    "https://docs.google.com/*",
+    "https://*.googleusercontent.com/*"
+  ],
+  "background": {
+    "service_worker": "bg.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "viewer.html"
+      ],
+      "matches": [
+        "https://*.instructure.com/*"
+      ]
+    }
+  ],
   "declarative_net_request": {
-    "rule_resources": [{ "id": "block_telemetry", "enabled": true, "path": "rules.json" }]
+    "rule_resources": [
+      {
+        "id": "block_telemetry",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
   },
-  "content_scripts": [{
-    "matches": ["https://*.instructure.com/robots.txt*"],
-    "js": ["boot.js"],
-    "run_at": "document_start"
-  }, {
-    "matches": ["https://*.instructure.com/*"],
-    "exclude_matches": ["https://www.instructure.com/*", "https://community.instructure.com/*", "https://*.instructure.com/api/*"],
-    "js": ["core.js", "content.js", "reader.js", "index.js", "palette.js"],
-    "run_at": "document_idle"
-  }]
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.instructure.com/robots.txt*"
+      ],
+      "js": [
+        "boot.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://*.instructure.com/*"
+      ],
+      "exclude_matches": [
+        "https://www.instructure.com/*",
+        "https://community.instructure.com/*",
+        "https://*.instructure.com/api/*"
+      ],
+      "js": [
+        "core.js",
+        "content.js",
+        "reader.js",
+        "index.js",
+        "palette.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
 }

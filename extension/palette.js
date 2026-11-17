@@ -1,5 +1,5 @@
 // ⌘K / Ctrl+K palette over the Quickstudy index.
-// Prefixes narrow the type (Discord-style); Tab on a course searches inside it.
+// Prefixes filter by type; Tab on a course limits the search to it.
 (() => {
   if (window.top !== window) return;
   const { shortName, courseCode, toneFor, clock, isEndOfDay, CSS_TOKENS } = window.Quickstudy;
@@ -17,7 +17,7 @@
   const TYPE_LABEL = { course: "Course", assignment: "Assignment", quiz: "Quiz", discussion: "Discussion", page: "Page",
     announcement: "Announcement", module: "Module", file: "File", link: "Link", command: "Command" };
   const MAX_ROWS = 60;
-  // 16px line icons (Raycast-style): the type at a glance, without a word on every row.
+  // 16px type icons.
   const ICON = {
     assignment: "M4 3h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM5.5 8.2l1.8 1.8 3.2-3.8",
     quiz: "M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12zM6.4 6.3a1.7 1.7 0 1 1 2.3 1.6c-.5.2-.7.6-.7 1v.4M8 11.2v.1",
@@ -48,16 +48,21 @@
   ].map((c, i) => ({ ...c, key: `command:${i}`, type: "command", id: String(i) }));
 
   // ---------- state ----------
-  let idx = null, corpus = [], courseById = {}, recent = {}, planner = [];
+  let idx = null, corpus = [], corpusKeys = new Set(), courseById = {}, recent = {}, planner = [];
+  // Live search results, kept for the page's lifetime.
+  const live = new Map(), asked = new Map();
+  let liveTimer = 0, pending = 0;
   let open = false, sel = 0, rows = [], scope = null, raf = 0;
 
   function prepare(index) {
     idx = index;
     courseById = Object.fromEntries(index.courses.map((c) => [c.id, c]));
-    corpus = [...index.courses, ...index.items, ...COMMANDS].map((it) => ({
-      it, t: (it.type === "course" ? it.short : it.title).toLowerCase(), c: (courseById[it.course_id]?.short || "").toLowerCase(),
-      k: ((it.kw || "") + " " + (it.module || "") + " " + (it.code || "") + " " + (it.type === "course" ? it.title : "")).toLowerCase(),
-    }));
+    corpus = [...index.courses, ...index.items, ...COMMANDS].map(entry);
+    corpusKeys = new Set(corpus.map((e) => e.it.key));
+  }
+  function entry(it) {
+    return { it, t: (it.type === "course" ? it.short : it.title).toLowerCase(), c: (courseById[it.course_id]?.short || "").toLowerCase(),
+      k: ((it.kw || "") + " " + (it.module || "") + " " + (it.code || "") + " " + (it.type === "course" ? it.title : "")).toLowerCase() };
   }
   const warm = () => (idx ? Promise.resolve() : IDX.load().then(prepare));
   IDX.onChange((index) => { prepare(index); if (open) schedule(); });
@@ -110,30 +115,31 @@
     q = q.trim().toLowerCase();
     const tokens = q.split(/\s+/).filter(Boolean);
     const out = [];
-    for (const e of corpus) {
+    const liveOnly = [...live.values()].filter((it) => !corpusKeys.has(it.key)).map((it) => ({ ...entry(it), live: true }));
+    for (const e of corpus.concat(liveOnly)) {
       const it = e.it;
       if (types && !types.includes(it.type)) continue;
       if (!types && it.type === "command" && !tokens.length) continue;
       if (scope && it.course_id !== scope.id) continue;
       if (scope && it.type === "course") continue;
-      if (!tokens.length) { out.push({ it, s: boost(it), pos: [] }); continue; }
+      if (!tokens.length) { out.push({ it, s: boost(it), pos: [], live: e.live || live.has(it.key) }); continue; }
       let s = 0, pos = [], ok = true;
       for (const tok of tokens) {
         const m = match(tok, e.t);
         if (m) { s += m[0]; pos = pos.concat(m[1]); continue; }
-        // A token can also match the course name or module ("phys lab") or keywords.
+        // Fall back to course name, module and keywords.
         const mc = !scope && match(tok, e.c), mk = match(tok, e.k);
         if (mc || mk) { s += Math.max(mc ? mc[0] : 0, mk ? mk[0] : 0) * 0.5; continue; }
         ok = false; break;
       }
-      if (ok) out.push({ it, s: s + boost(it), pos });
+      if (ok) out.push({ it, s: s + boost(it), pos, live: e.live || live.has(it.key) });
     }
     if (!tokens.length && types && types.includes("assignment")) {
       // Browsing assignments: upcoming first, then most recent past.
       const now = Date.now(), t = (x) => (x.it.due_at ? new Date(x.it.due_at) - now : 1e15);
       out.sort((a, b) => (t(a) < -864e5) - (t(b) < -864e5) || (t(a) < -864e5 ? t(b) - t(a) : t(a) - t(b)));
     } else out.sort((a, b) => b.s - a.s);
-    return { results: out.slice(0, MAX_ROWS), prefix, total: out.length };
+    return { results: out.slice(0, MAX_ROWS), prefix, q, total: out.length };
   }
 
   // Empty box: what you opened lately, and what's due.
@@ -145,7 +151,7 @@
     if (rec.length) groups.push(["Recent", rec]);
     const byUrl = new Map(corpus.map((e) => [e.it.url, e.it]));
     const due = planner.filter((p) => {
-      const done = p.planner_override ? p.planner_override.marked_complete : !!(p.submissions && (p.submissions.submitted || p.submissions.excused));
+      const done = window.Quickstudy.isDone(p);
       const t = new Date(p.plannable_date) - Date.now();
       return !done && p.plannable_type !== "announcement" && t > -7 * 864e5 && t < 7 * 864e5 && (!scope || String(p.course_id) === scope.id);
     }).sort((a, b) => new Date(a.plannable_date) - new Date(b.plannable_date)).slice(0, 6)
@@ -207,7 +213,7 @@
         <input role="combobox" aria-expanded="true" aria-controls="res" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Search Canvas">
         <span class="mode"></span></div>
       <ul id="res" role="listbox"></ul>
-      <div class="foot"><span>↵ open</span><span>⌘↵ new tab</span><span>⇥ search course</span><span class="st"></span></div>
+      <div class="foot"><span>↵ open</span><span>⌘↵ new tab</span><span>⇥ search course</span><span class="pinhint" hidden>⌥↵ beside</span><span class="pinhint" hidden>⇧↵ pin</span><span class="st"></span></div>
     </div></div>`;
   const root = shadow.querySelector(".pal"), input = shadow.querySelector("input"), list = shadow.querySelector("ul"),
     scopeEl = shadow.querySelector(".scope"), modeEl = shadow.querySelector(".mode"), statusEl = shadow.querySelector(".st");
@@ -241,7 +247,6 @@
     if (it.type === "course") tone(li, it.id);
     const label = it.type === "course" ? it.short : it.title;
     const title = el("span", "t"); title.append(highlight(label, pos || []));
-    // Secondary text sits on the same line, after the title (Raycast's subtitle).
     const sub = it.type === "course" ? it.title : it.type === "command" ? (it.url && !it.url.startsWith("http") ? it.url : "") : it.module || "";
     const line = el("span", "line"); line.append(title);
     if (sub) line.append(el("span", "m", sub));
@@ -282,17 +287,37 @@
         frag.append(tips);
       }
     } else {
-      const { results } = search(raw);
-      results.forEach((r, i) => { frag.append(rowEl(r.it, r.pos, i)); rows.push(r.it); });
-      if (!results.length) frag.append(el("li", "none", idx && idx.items.length ? "No matches." : "Building the index… results appear as courses finish."));
+      const { results, q } = search(raw);
+      const local = results.filter((r) => !r.live), found = results.filter((r) => r.live);
+      for (const r of local) { frag.append(rowEl(r.it, r.pos, rows.length)); rows.push(r.it); }
+      if (found.length) frag.append(el("li", "h", "From Canvas"));
+      for (const r of found) { frag.append(rowEl(r.it, r.pos, rows.length)); rows.push(r.it); }
+      if (!results.length) frag.append(el("li", "none", pending ? "Searching Canvas…" : idx && idx.items.length ? "No matches." : "Building the index… results appear as courses finish."));
+      if (local.length < 5 && q.length >= 2) askCanvas(q);
     }
     list.replaceChildren(frag);
     sel = Math.min(sel, Math.max(rows.length - 1, 0));
     paintSel();
     const n = idx ? idx.items.length : 0;
-    statusEl.textContent = IDX.isBuilding() ? `indexing… ${n} items` : n ? `${n.toLocaleString()} items` : "";
+    statusEl.textContent = pending ? "searching Canvas…" : IDX.isBuilding() ? `indexing… ${n} items` : n ? `${n.toLocaleString()} items` : "";
   }
   const schedule = () => { if (!raf) raf = requestAnimationFrame(render); };
+
+  // Query Canvas when local results are few: debounced, once per query and scope.
+  function askCanvas(q) {
+    const key = `${scope ? scope.id : ""}|${q}`;
+    if (asked.has(key)) return;
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(() => {
+      const now = search(input.value).q;
+      if (!open || now !== q || asked.has(key)) return;
+      pending++;
+      const p = IDX.searchLive(q, scope && scope.id).then((items) => { for (const it of items) live.set(it.key, it); }).catch(() => {});
+      asked.set(key, p);
+      p.finally(() => { pending--; schedule(); });
+      schedule();
+    }, 250);
+  }
 
   function paintSel() {
     list.querySelectorAll('li.r[aria-selected="true"]').forEach((n) => n.removeAttribute("aria-selected"));
@@ -317,19 +342,30 @@
     chrome.storage.local.set({ recent });
   }
 
-  function go(it, newTab) {
+  function go(it, newTab, beside) {
     if (!it) return;
     remember(it);
     close();
     if (it.run) return it.run();
     const url = it.url;
     if (newTab || it.newTab) return window.open(url, "_blank", "noopener");
-    if (window.QuickstudyReader && window.QuickstudyReader.open(url)) return;
+    // Files and ⌥ open beside the current workspace; other items replace it.
+    if (window.QuickstudyReader && window.QuickstudyReader.open(url, { beside: beside || it.type === "file" || it.type === "link" })) return;
     location.assign(url);
+  }
+
+  // Shift+Enter: pin a file to the open workspace.
+  function pin(it) {
+    const R = window.QuickstudyReader;
+    if (!it || !R || !R.isOpen() || (it.type !== "file" && it.type !== "link")) return;
+    const name = R.pin({ title: it.title, url: it.type === "link" && it.external_url ? it.external_url : it.url });
+    if (name) statusEl.textContent = `pinned to ${name}`;
   }
 
   function show() {
     if (open) { input.select(); return; }
+    const ws = !!(window.QuickstudyReader && window.QuickstudyReader.isOpen());
+    shadow.querySelectorAll(".pinhint").forEach((h) => { h.hidden = !ws; });
     open = true;
     if (!host.isConnected) document.body.append(host);
     root.hidden = false;
@@ -339,7 +375,7 @@
     render();
     if (!idx || !idx.generated_at) IDX.build().catch(() => {});
   }
-  function close() { open = false; root.hidden = true; setScopeQuiet(null); }
+  function close() { open = false; root.hidden = true; clearTimeout(liveTimer); setScopeQuiet(null); }
   function setScopeQuiet(c) { scope = c; scopeEl.hidden = true; input.placeholder = "Search Canvas"; }
 
   input.addEventListener("input", () => { sel = 0; schedule(); });
@@ -349,7 +385,8 @@
     else if (k === "ArrowUp" || (e.ctrlKey && k === "p")) { e.preventDefault(); sel = Math.max(sel - 1, 0); paintSel(); }
     else if (k === "PageDown") { e.preventDefault(); sel = Math.min(sel + 8, rows.length - 1); paintSel(); }
     else if (k === "PageUp") { e.preventDefault(); sel = Math.max(sel - 8, 0); paintSel(); }
-    else if (k === "Enter") { e.preventDefault(); go(rows[sel], e.metaKey || e.ctrlKey); }
+    else if (k === "Enter" && e.shiftKey) { e.preventDefault(); pin(rows[sel]); }
+    else if (k === "Enter") { e.preventDefault(); go(rows[sel], e.metaKey || e.ctrlKey, e.altKey); }
     else if (k === "Tab" && !e.shiftKey) {
       e.preventDefault();
       const it = rows[sel];
@@ -369,8 +406,7 @@
     e.preventDefault(); e.stopPropagation();
     open ? close() : show();
   }, true);
-  // Esc: first clears the query (or leaves the course scope), then closes. Works wherever focus is,
-  // and never reaches the reader or Canvas underneath.
+  // Esc clears the query, then the course scope, then closes.
   addEventListener("keydown", (e) => {
     if (!open || e.key !== "Escape") return;
     e.preventDefault(); e.stopImmediatePropagation();
@@ -379,7 +415,7 @@
     else close();
   }, true);
 
-  // Start reading the index as soon as a modifier goes down, so the first open is warm.
+  // Preload the index when a modifier key is pressed.
   addEventListener("keydown", (e) => { if (e.key === "Meta" || e.key === "Control") warm(); }, true);
 
   window.QuickstudyPalette = { show, close };

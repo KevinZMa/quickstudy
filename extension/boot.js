@@ -1,7 +1,6 @@
-// Fast entry for links opened from outside Canvas (the toolbar popup).
-// The popup opens /robots.txt#lite:/courses/... — Canvas answers that in ~0.1 s instead of ~1 s
-// for a full page. Here we swap the address to the real path and let the reader draw it from
-// cache. Reloading the tab then loads the real Canvas page, so nothing is ever a dead end.
+// Entry point for tasks opened from the toolbar popup. The popup loads /robots.txt#lite:<path>,
+// which Canvas serves faster than a full page; this script sets the real path and the reader
+// renders it from cache. Reloading loads the full Canvas page.
 (() => {
   if (window.top !== window || location.pathname !== "/robots.txt" || !location.hash.startsWith("#lite:")) return;
   const target = decodeURIComponent(location.hash.slice(6));
