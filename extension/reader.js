@@ -7,7 +7,7 @@
   const FILE = /^\/(?:courses\/(\d+)\/)?files\/(\d+)(?:\/(?:preview|download))?\/?$/;
   const GDOC = /^https:\/\/docs\.google\.com\/(document|presentation|spreadsheets)\/d\/([\w-]+)/;
   const SKIP_IDS = new Set(["new", "edit", "syllabus"]);
-  const MAX_CACHED = 80, SPINE = 40, DOC_W = 620, FILE_W = 780;
+  const MAX_CACHED = 80, SPINE = 40;
   const mem = new Map(); // path -> Promise<doc>
 
   function parse(href) {
@@ -136,8 +136,9 @@
     @media (prefers-color-scheme: dark) { .wrap { --paper:#15161A; --side:#101114; --rule:#2A2D34; --rule-strong:#3A3E47; --ink:#E6E4DF; --ink-soft:#9D9C96;
       --ink-faint:#94938B; --accent:#8CC2EC; --good:#A6CFA6; --hold:#E4C87F; --sel:#23262C; } }
     .strip { display:flex; height:100%; overflow-x:auto; overflow-y:hidden; overscroll-behavior-x:none; }
-    .pane { position:sticky; flex:0 0 var(--w); width:var(--w); height:100%; background:var(--paper); border-left:1px solid var(--rule);
-      display:flex; flex-direction:column; min-width:0; transition:box-shadow 200ms ease; }
+    /* Panes share the width (files 1.5x), down to a minimum; below that they fold. */
+    .pane { position:sticky; flex:2 1 0; min-width:440px; height:100%; background:var(--paper); border-left:1px solid var(--rule);
+      display:flex; flex-direction:column; transition:box-shadow 200ms ease; }
     .pane.over { box-shadow:-8px 0 18px -12px rgba(0,0,0,.35); }
     .pane.enter { animation:paneIn 150ms linear; }
     @keyframes paneIn { from { opacity:0; } }
@@ -145,7 +146,8 @@
     .pane.folded > .bar, .pane.folded > .body { opacity:0; }
     @media (prefers-reduced-motion: reduce) { .pane.enter { animation:none; } .pane, .pane > .bar, .pane > .body, .spine { transition:none; } }
     .content a.active, .fi a.active { background:color-mix(in srgb, var(--accent) 14%, transparent); border-radius:3px; box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent); }
-    .single .pane { flex:1 1 auto; width:auto; border-left:0; box-shadow:none; }
+    .pane.file { flex-grow:3; min-width:600px; }
+    .single .pane { border-left:0; box-shadow:none; }
     .body { flex:1; overflow-y:auto; min-height:0; }
     .bar { display:flex; align-items:center; gap:14px; padding:10px 18px; border-bottom:1px solid var(--rule); font-size:13px; flex:none; min-width:0; }
     .bar .name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink-soft); }
@@ -344,7 +346,7 @@
     p.doc = doc;
     const body = p.el.querySelector(".body");
     if (doc.kind === "file") {
-      p.el.style.setProperty("--w", `${FILE_W}px`);
+      p.el.classList.add("file");
       if (!body.querySelector("iframe.viewer")) {
         const f = el("iframe", "viewer");
         f.src = chrome.runtime.getURL("viewer.html") + `?src=${encodeURIComponent(doc.src)}&origin=${encodeURIComponent(location.origin)}`;
@@ -405,7 +407,7 @@
     const ref = parse(href);
     const pane = el("section", "pane enter");
     pane.addEventListener("animationend", () => pane.classList.remove("enter"), { once: true });
-    pane.style.setProperty("--w", `${isFile(ref) ? FILE_W : DOC_W}px`);
+    if (isFile(ref)) pane.classList.add("file");
     const bar = el("div", "bar");
     const name = el("span", "name", "");
     const go = el("a", "go", ref.kind === "gdoc" ? "Open in Google" : "Open in Canvas");
